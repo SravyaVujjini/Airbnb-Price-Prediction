@@ -1,0 +1,681 @@
+---
+title: "Final Project"
+author: "Sravya Vujjini, Lakshmi Sai Ram Marupudi, Niharika Ganji, Yerramsetti Dharma Teja"
+date: "2023-11-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Loading libraries**
+
+```{r}
+library(tidyr)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(mgcv)
+library(leaflet)
+library(leaflet.extras)
+library(sf)
+library(MASS)
+library(ggplot2)
+library(gridExtra)
+library(vip)
+library(randomForest)
+```
+
+**Obtaining Data**
+
+```{r}
+airbnb_listings <- read.csv("listings.csv")
+#View(airbnb_listings)
+```
+
+```{r}
+#head(airbnb_listings)
+```
+
+**Q1. Predicting the price of a listing based on its location, size (number of bedrooms and bathrooms, number of accommodates) and time of the year**
+
+**Data Cleaning**
+
+Removing unnecessary columns that are not relevant to us for our research question and use only the required columns.
+
+```{r}
+Required_columns <- c("latitude","longitude","accommodates","bathrooms_text", "bedrooms", "price", "availability_365")
+
+airbnb_data <- airbnb_listings[, Required_columns]
+
+#head(airbnb_data)
+```
+
+**Checking for the missing values**
+
+```{r}
+# Check for missing values in each column
+missing_counts <- colSums(is.na(airbnb_data))
+
+# Print the missing counts
+print(missing_counts)
+```
+
+
+**Impute missing values in bedrooms with median**
+
+```{r}
+airbnb_data$bedrooms[is.na(airbnb_data$bedrooms)] <- median(airbnb_data$bedrooms, na.rm = TRUE)
+
+#View(airbnb_data)
+```
+
+
+**Extracting numeric part from bathrooms_text and convert to numeric**
+
+```{r}
+airbnb_data$bathrooms <- as.numeric(gsub("[^0-9.]", "", airbnb_data$bathrooms_text))
+
+airbnb_data<- subset(airbnb_data, select = -c(bathrooms_text))
+airbnb_data$bathrooms[is.na(airbnb_data$bathrooms)] <- median(airbnb_data$bathrooms, na.rm = TRUE)
+
+#View(airbnb_data)
+```
+
+**Removing dollar sign in the price column and convert to numeric**
+
+```{r}
+airbnb_data$price <- as.numeric(gsub("[$,]", "", airbnb_data$price))
+
+#View(airbnb_data)
+```
+
+
+**Summary statistics and plots**
+
+```{r}
+summary(airbnb_data)
+```
+**Distribution of Airbnb listing prices**
+
+```{r,warning=FALSE}
+ggplot(airbnb_data, aes(x = price)) +
+  geom_histogram(binwidth = 50, fill = "blue", color = "black") +
+  ggtitle("Distribution of Airbnb listing Prices for the City of Ashville") +
+  xlab("Price of the unit in $'s") +
+    ylab("Count of units with the same price") 
+  #xlim(0, 1000)
+```
+
+The distribution is skewed to the right, meaning that there are more listings at the lower end of the price than at the higher end.
+
+The median price is around $100 per night. Overall, the skew to the right reflects a concentration of budget-friendly accommodations, making it advantageous for cost-conscious travelers seeking economical options. The rightward tail of the distribution signifies that while there are affordable listings the frequency of higher-priced accommodations decreases.
+
+
+**Distribution of Airbnb listing prices with log transformed price **
+
+```{r}
+airbnb_data$logprice<-log(airbnb_data$price)
+ggplot(airbnb_data, aes(x = logprice)) +
+  geom_histogram( fill = "blue", color = "black") +
+  ggtitle("Distribution of Airbnb listing Prices") 
+```
+
+We performed log transformation on the distribution of Airbnb listing prices to address the rightward skewness observed in the original data. By applying log transform, we aimed to mitigate the impact of extreme values and achieve a distribution closer to normal. 
+
+The transformed data exhibited a more balanced distribution, making it easier to interpret and analyze. While outliers are still present, their influence has been reduced, allowing us to better explore patterns and relationships in the pricing data.
+
+
+**Scatter plots : price vs predictor variables**
+
+```{r,warning=FALSE}
+for (predictor in c("latitude", "longitude", "accommodates", "availability_365", "bedrooms", "bathrooms")) {
+
+  plot <- ggplot(airbnb_data, aes_string(x = predictor, y = "logprice")) +
+    geom_point() +
+    ggtitle(paste("Scatter Plot: Price* vs.", predictor)) +
+    xlab(predictor) +
+    ylab("Price*") + 
+    labs(subtitle = "* - Log transformed prices") +
+    geom_smooth(method = "lm", se = FALSE, col = "purple") +
+    geom_smooth(method ="loess",se = FALSE,col="blue" )+
+    geom_smooth(method = "gam", se =FALSE,col="orange")+
+    #geom_smooth(method = "glm", se =FALSE,col="magenta")+
+    theme_minimal()
+  
+  print(plot)
+}
+```
+
+
+From the above scatter plots between Airbnb listing prices and various factors like latitude, longitude, accommodates, availability_365, bedrooms and bathrooms, intriguing patterns emerged. Latitude, longityde and availability thoughout the yeat exhibited horizontal alignment, and the number of bedrooms, bathrooms and accommodates demonstrated positive linear trends. 
+
+```{r,warning=FALSE}
+# Plot a graph to find the best correlation between the parameters.
+
+ggpairs(airbnb_data)
+
+```
+
+From the plots above the most correlated variables with the log price are "accommodates","bedrooms","bathrooms" and next best variable will be the "availability_365"
+
+**Fitting a linear model**
+
+```{r}
+model <- lm(logprice ~ latitude + longitude + accommodates + bedrooms + bathrooms + availability_365, data = airbnb_data)
+model.loess<-loess(logprice ~ accommodates + bedrooms + bathrooms, data = airbnb_data)
+model.gam<-gam(logprice ~ latitude + longitude + accommodates + bedrooms + bathrooms + availability_365, data = airbnb_data,method = "REML")
+
+
+model.rlm <- rlm(logprice ~ latitude + longitude + accommodates + bedrooms + bathrooms + availability_365, data = airbnb_data)
+
+model.glm <- glm(logprice ~ latitude + longitude + accommodates + bedrooms + bathrooms + availability_365, data = airbnb_data)
+
+summary(model.glm)
+
+summary(model)
+summary(model.loess)
+summary(model.rlm)
+summary(model.gam)
+
+AIC(model)
+AIC(model.rlm)
+AIC(model.glm)
+AIC(model.gam)
+
+# Assuming airbnb_data is your data frame
+rf_model <- randomForest(logprice ~ latitude + longitude + accommodates + bedrooms + bathrooms + availability_365, data = airbnb_data)
+
+(rf_model)
+```
+
+
+We applied various regression models ad gained valuable insights into the determinants of Airbnb listing prices. The Random Forest model outperformed the traditional regression models, achieving the highest variance explained at 60.36%. This underscores its predictive capabilities in capturing complex relationships among location variables, accommodation features, and year-round availability. 
+
+**Plot for residuals against fitted values with the rf_model**
+
+```{r,warning=FALSE}
+predictions <- predict(rf_model, newdata = airbnb_data)
+residuals <- airbnb_data$logprice - predictions
+#residuals <- resid(rf_model)
+
+ggplot() +
+  geom_point(aes(x = predictions, y = residuals)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  ggtitle("Residuals vs. Fitted Values") +
+  xlab("Fitted Values") +
+  ylab("Residuals") +
+  theme_minimal() 
+```
+
+From the above plot, we can notice that there is discrepancy in the residual plot, as there is positive slope, when explored further, we identified a substantial gap between the third quartile \$200 and the maximum value at \$11,429. To address this, we limited the plot's y-axis to minimize the impact of extreme values, following the adjustment, the residuals demonstrated a more homogeneous distribution around the horizontal line, suggesting the improved model performance and resilence to the influence of outliers. 
+
+
+**Making predictions on the dataset**
+
+```{r}
+predictions <- predict(rf_model, newdata = airbnb_data)
+```
+
+**Adding the predicted values to your original dataset**
+
+```{r}
+airbnb_data <- cbind(airbnb_data, Predicted_Price = predictions)
+```
+
+
+**Visualize the relationship between actual and predicted prices**
+
+```{r,warning=FALSE}
+ggplot(airbnb_data, aes(x = logprice, y = Predicted_Price)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  geom_smooth(method="lm",se = FALSE,col="purple")+
+  geom_smooth(method="loess",se = FALSE,col="blue")+
+  geom_smooth(method = "gam", se =FALSE,col="orange")+
+  ggtitle("Actual vs Predicted Prices") +
+  xlab("Actual Prices") +
+  ylab("Predicted Prices") +
+  theme_minimal()
+```
+
+
+From the above plot, we can observe that the points are clustered around the diagonal line, which suggest that our model does a good job of predicting prices. However, there are a few outliers, particularly at the higher end of the price which suggests some room for improvement for high-priced listings. 
+
+```{r,warning=FALSE}
+ggplot(airbnb_data, aes(x = logprice, y = Predicted_Price)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  geom_smooth(method="lm",se = FALSE,col="purple")+
+  geom_smooth(method="loess",se = FALSE,col="blue")+
+  geom_smooth(method = "gam", se =FALSE,col="orange")+
+  ggtitle("Actual vs Predicted Prices") +
+  xlab("Actual Prices") +
+  ylab("Predicted Prices") +xlim(3,7)+
+  theme_minimal()
+# scale limited.
+```
+
+
+*Visualize the relationship between actual and predicted prices with the distribution*
+
+```{r,warning=FALSE}
+airbnb_data1 <- subset(airbnb_data, price <= 2000)
+median(airbnb_data1$price)
+test <- split(airbnb_data1, ifelse(airbnb_data1$price <= median(airbnb_data1$price), "Group1", "Group2"))
+
+#test <- split(airbnb_data, ifelse(airbnb_data$price <= median(airbnb_data$price), "Group1", "Group2"))
+
+test1 <- test$Group1
+test2 <- test$Group2
+
+histogram1 <- ggplot(test1, aes(x = price)) +
+  geom_histogram(binwidth = 10, fill = "lightblue", color = "black", alpha = 0.7) +
+  labs(title = "Price Distribution - before Model",
+       x = "Price",
+       y = "Frequency") +
+  theme_minimal()
+
+histogram2 <- ggplot(test2, aes(x = price)) +
+  geom_histogram(binwidth = 100, fill = "lightgreen", color = "black", alpha = 0.7) +
+  labs(title = "Price Distribution - before Model",
+       x = "Price",
+       y = "Frequency") +
+  theme_minimal()
+
+test1$price_after_model<-exp(test1$Predicted_Price)
+test2$price_after_model<-exp(test2$Predicted_Price)
+
+histogram3 <- ggplot(test1, aes(x = price_after_model)) +
+  geom_histogram(binwidth = 10, fill = "lightblue", color = "black", alpha = 0.7) +
+  labs(title = "Price Distribution - after Model",
+       x = "Price",
+       y = "Frequency") +xlim(0,130)+
+  theme_minimal()
+
+histogram4 <- ggplot(test2, aes(x = price_after_model)) +
+  geom_histogram(binwidth = 100, fill = "lightgreen", color = "black", alpha = 0.7) +
+  labs(title = "Price Distribution -  after Model",
+       x = "Price",
+       y = "Frequency") +xlim(0,2000)+
+  theme_minimal()
+
+
+grid.arrange(histogram1, histogram3, ncol = 2)
+
+grid.arrange(histogram2, histogram4, ncol = 2)
+
+```
+
+We used an approach to create subsets for comparative analysis. It helps in understanding how the model performs differently for lower and higher priced listings, and they resulted in similar distribution plots both before and after analysis. 
+
+```{r}
+model.rf.test1 <- randomForest(logprice ~ latitude + longitude + accommodates + bedrooms + bathrooms + availability_365, data = test1)
+model.rf.test2 <- randomForest(logprice ~ latitude + longitude + accommodates + bedrooms + bathrooms + availability_365, data = test2)
+
+library(vip)
+
+plot1 <- vip::vip(model.rf.test1, num_features = 6) + ggtitle("Plots with price below the median price")
+plot2 <- vip::vip(model.rf.test2, num_features = 6) + ggtitle("Plots with price above the median price")
+
+grid.arrange(plot1, plot2,nrow=2)
+```
+
+We generated variable importance plots to visually compare the importance of predictor variables in each model to understand the driving factors behind different price categories. 
+
+The model considers both longitude and latitude as important predictors for listings with prices below the median.Additionally, number of bathrooms is a key factor in determining higher prices. This suggests that geographical location plays a significant role in determining prices with prices both below and above the median.
+
+**Exploring Geospatial Price Variabtions in Airbnb Listings**
+
+```{r}
+airbnb_data$latitude <- as.numeric(as.character(airbnb_data$latitude))
+airbnb_data$longitude <- as.numeric(as.character(airbnb_data$longitude))
+airbnb_data$logprice <- as.numeric(as.character(airbnb_data$logprice))
+airbnb_data <- airbnb_data[complete.cases(airbnb_data[, c("latitude", "longitude", "logprice")]), ]
+
+heatmap <- leaflet(airbnb_data) %>%
+  addTiles() %>%
+  addHeatmap(
+    lng = ~longitude,
+    lat = ~latitude,
+    intensity = ~logprice,
+    blur = 20,
+    max = max(airbnb_data$logprice),
+    radius = 10
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    pal = colorNumeric(
+      palette = "viridis",
+      domain = airbnb_data$logprice
+    ),
+    values = ~logprice,
+    title = "Log Price"
+  )
+
+heatmap
+
+```
+
+The generated heatmap provides a visual representation of how latitude and longitude influence Airbnb listing prices. Areas with darker colors on the heatmap correspond to higher log-transformed prices, and lighter areas correspond to lower log-transformed prices.
+
+
+**Exploring the relation between lattitude and longitude using the loess model.**
+
+```{r}
+loess_model <- loess(latitude ~ longitude, data = airbnb_data)
+predictions <- predict(loess_model, newdata = data.frame(longitude = airbnb_data$longitude))
+
+ggplot(airbnb_data, aes(x = longitude, y = latitude)) +
+  geom_point() +
+  geom_smooth(aes(y = predictions), method = "loess", se = FALSE, color = "blue") +
+  ggtitle("Scatter Plot with Loess Line: Latitude vs Longitude") +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme_minimal()
+```
+
+The scatterplot shows a similar pattern to the heatmap above, with higher prices concentrated in the northern and eastern parts of the country and this suggests that latitude and longitude are important factors in determining the prices of airbnb listings and te consistency between scatter plot and RF model findings further strengthens the evidence for this relationship. 
+
+**Question:02**
+
+**Factors contributing the most to a guest's perceived value of a listing**
+
+```{r}
+airbnb_listings <- read.csv("listings.csv")
+# List of additional required columns for question-02
+additional_columns <- c("host_response_time", "host_response_rate", "host_is_superhost",
+                        "host_identity_verified",  "amenities",
+                        "review_scores_rating", "number_of_reviews", 
+                         "review_scores_cleanliness", "review_scores_checkin")
+
+
+#Required_columns <- c(Required_columns, additional_columns)
+airbnb_data <- airbnb_listings[,additional_columns]
+
+
+airbnb_data <- airbnb_data %>%
+  filter(!is.na(review_scores_rating) &
+         !is.na(review_scores_cleanliness) &
+         !is.na(review_scores_checkin))
+
+```
+
+
+**Converting categorical to numerical based on precedence**
+```{r}
+
+response_time_mapping <- c("within an hour" = 1, "within a few hours" = 2, 
+                           "within a day" = 3, "a few days or more" = 4)
+
+airbnb_data <- airbnb_data %>%
+  mutate(host_response_time = response_time_mapping[host_response_time])
+
+median_value <- median(airbnb_data$host_response_time, na.rm = TRUE)
+airbnb_data$host_response_time[is.na(airbnb_data$host_response_time)] <- median_value
+#head(airbnb_data)
+```
+
+**Dealing with other cat variables**
+```{r}
+
+# Removing % sign from host_response_rate
+
+airbnb_data$host_response_rate <- as.numeric(gsub("[%,]", "", airbnb_data$host_response_rate))
+median_value <- median(airbnb_data$host_response_rate, na.rm = TRUE)
+airbnb_data$host_response_rate[is.na(airbnb_data$host_response_rate)] <- median_value
+
+# Imputing true/false values with 0 and 1 
+airbnb_data <- airbnb_data %>%
+  mutate(host_is_superhost = ifelse(host_is_superhost == "t", 1, 0),
+         host_identity_verified = ifelse(host_identity_verified == "t", 1, 0))
+
+# adding a new column amenities count based on the number of amenities provided
+
+library(stringr)
+airbnb_data <- airbnb_data %>%
+  mutate(amenities_count = str_count(amenities, ",") + 1)
+
+airbnb_data$amenities_count[airbnb_data$amenities == "[]"] <- 0
+
+#head(airbnb_data)
+```
+
+**Feature Engineering a new column 'weighted review score' based on number of reviews and review score rating**
+
+```{r}
+airbnb_data <- airbnb_data %>%
+  mutate(log_reviews = log1p(number_of_reviews))
+
+airbnb_data <- airbnb_data %>%
+  mutate(normalized_log_reviews = log_reviews/max(log_reviews))
+
+
+airbnb_data <- airbnb_data %>%
+  mutate(weighted_review_score = 
+           (normalized_log_reviews + review_scores_rating))
+
+airbnb_data <- airbnb_data %>% 
+  mutate(scaled_values = ((weighted_review_score - min(weighted_review_score)) / (max(weighted_review_score) - min(weighted_review_score))) * 5)
+
+
+airbnb_data$score_difference <- airbnb_data$weighted_review_score - 
+  airbnb_data$review_scores_rating
+
+summary(airbnb_data)
+
+```
+
+
+```{r}
+head(airbnb_data)
+```
+
+**Distribution of Weighted Review Score**
+
+```{r}
+ggplot(airbnb_data, aes(x = weighted_review_score, fill = 'Weighted')) +
+  geom_density(alpha = 0.5, fill = "red") +
+  ggtitle("Density of Weighted Review Scores") +
+  xlab("Weighted Review Score") +
+  ylab("Density")
+```
+
+```{r}
+summary(airbnb_data$score_difference)
+```
+
+```{r}
+# Load the ggplot2 library
+library(ggplot2)
+library(gridExtra)
+
+
+# Plotting the density plot for 'original review_scores_rating'
+p1 <- ggplot(airbnb_data, aes(x = review_scores_rating, fill = 'Original')) +
+  geom_density(alpha = 0.5, fill = "blue") +
+  ggtitle("Density of Original Review Scores") +
+  xlab("Original Review Score") +
+  ylab("Density")
+
+
+p2 <- ggplot(airbnb_data, aes(x = scaled_values, fill = 'Weighted')) +
+  geom_density(alpha = 0.5, fill = "red") +
+  ggtitle("Density of Weighted Review Scores") +
+  xlab("Weighted Review Score") +
+  ylab("Density")
+
+# Combine the plots for comparison
+grid.arrange(p1, p2, nrow = 2)
+
+```
+
+**Understanding Relationships**
+
+```{r}
+current_palette <- palette()
+print(current_palette)
+```
+
+
+```{r}
+ggplot(airbnb_data, aes(x = review_scores_cleanliness, y = review_scores_rating)) +
+  geom_point(aes(alpha = abs(score_difference)),color ='darkgreen') +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Score for Cleanliness vs Weighted Review Scores") +
+  xlab("Cleanliness Score") +  
+  scale_alpha_continuous(range = c(0.1, 1), name = 'Absolute Score Difference') +  # Set the alpha range
+  guides(alpha = guide_legend(title = "Added Incentive"))+ xlim(4,5)+
+  ylab("Weighted Review Scores Rating")
+
+
+ggplot(airbnb_data, aes(x = review_scores_cleanliness, y = scaled_values)) +
+  geom_point(aes(alpha = abs(score_difference)), color='darkgreen') +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Score for Cleanliness vs Weighted Review Scores") +
+  xlab("Cleanliness Score") +   
+  scale_alpha_continuous(range = c(0.1, 1), name = 'Absolute Score Difference') +  # Set the alpha range
+  guides(alpha = guide_legend(title = "Added Incentive"))+ xlim(4,5)+
+  ylab("Weighted Review Scores Rating")
+```
+
+
+The positive slope in the graph suggests that as cleanliness scores increase, so do the weighted review scores, indicating that guests place high value on cleanliness when rating their stay. The concentration at the higher end shows that listings with exceptional cleanliness are rewarded with higher weighted scores. Although there are a significant number of listings with high cleanliness scores, the lower number of ratings add to their weighted score at the lower end.
+
+```{r}
+ggplot(airbnb_data, aes(x = review_scores_checkin, y = review_scores_rating)) +
+  geom_point(aes(alpha = abs(score_difference)), color='darkgreen') +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Score for Check-In vs Weighted Review Scores") +
+  scale_alpha_continuous(range = c(0.1, 1), name = 'Absolute Score Difference') +  # Set the alpha range
+  guides(alpha = guide_legend(title = "Added Incentive"))+
+  xlab("Check-In") +  xlim(4,5)+
+  ylab("Weighted Review Scores Rating")
+
+
+ggplot(airbnb_data, aes(x = review_scores_checkin, y = scaled_values)) +
+  geom_point(aes(alpha = abs(score_difference)),color='darkgreen') +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Score for Check-In vs Weighted Review Scores") +
+  scale_alpha_continuous(range = c(0.1, 1), name = 'Absolute Score Difference') +  # Set the alpha range
+  guides(alpha = guide_legend(title = "Added Incentive"))+
+  xlab("Check-In Score") +  xlim(4,5)+
+  ylab("Weighted Review Scores Rating")
+```
+
+
+Similar to cleanliness, the positive trend line for check-in demonstrates that smooth check-in processes are likely to result in higher weighted review scores. The cluster of higher scores at the top end emphasizes the importance guests place on an easy check-in experience. The decline in weighted review score at the higher end of check-in scores is due to a lower number of ratings for those listings as seen.
+
+
+```{r}
+ggplot(airbnb_data, aes(x = host_response_time, y = review_scores_rating, color = ifelse(score_difference>0, "Incentivized", "Penalized"))) +
+  geom_point(aes(alpha = abs(score_difference))) +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Score for Cleanliness vs Weighted Review Scores") +
+  scale_color_manual(values = c("Incentivized" = "darkgreen", "Penalized" = "#F5C710"), name = 'Difference')+
+  xlab("Cleanliness") +
+  ylab("Weighted Review Scores Rating")
+
+
+ggplot(airbnb_data, aes(x = host_response_time, y = scaled_values)) +
+  geom_point(aes(alpha = abs(score_difference)), color='#CD0BBC') +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Score for Host Response Time vs Weighted Review Scores") +
+  scale_alpha_continuous(range = c(0.1, 1), name = 'Absolute Score Difference') +  # Set the alpha range
+  guides(alpha = guide_legend(title = "Added Incentive"))+
+  xlab("Host Response Time") +
+  ylab("Weighted Review Scores Rating")
+```
+
+
+The downward trend indicates that longer host response times may lead to lower weighted review scores, suggesting that guests appreciate quick and efficient communication from hosts. 
+
+
+```{r}
+ggplot(airbnb_data, aes(x = amenities_count, y = review_scores_rating, color = ifelse(score_difference>0, "Incentivized", "Penalized"))) +
+  geom_point(aes(alpha = abs(score_difference))) +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Score for Cleanliness vs Weighted Review Scores") +
+  scale_color_manual(values = c("Incentivized" = "darkgreen", "Penalized" = "#F5C710"), name = 'Difference')+
+  xlab("Cleanliness") +
+  ylab("Weighted Review Scores Rating")
+
+
+
+ggplot(airbnb_data, aes(x = amenities_count, y = scaled_values)) +
+  geom_point(aes(alpha = abs(score_difference)), color='#F5C710') +
+  geom_smooth(method="lm", se = FALSE, col = "blue") +
+  geom_smooth(method="loess", se = FALSE, col = "#CD0BBC") +
+  ggtitle("Amenities Count vs Weighted Review Scores") +
+  scale_alpha_continuous(range = c(0.1, 1), name = 'Absolute Score Difference') +  # Set the alpha range
+  guides(alpha = guide_legend(title = "Added Incentive"))+
+  xlab("Amenities Count") +
+  ylab("Weighted Review Scores Rating")+ylim(2,5)
+```
+
+
+The plot shows a nonlinear relationship; an optimal range of amenity counts correlates with higher weighted review scores, but beyond a certain point, additional amenities do not significantly increase scores.
+
+
+**Modeling**
+
+```{r}
+library(randomForest)
+
+# RF model
+rf_model <- randomForest(scaled_values ~ host_response_time + host_response_rate + 
+                         host_is_superhost + host_identity_verified + amenities_count + 
+                         review_scores_cleanliness + review_scores_checkin, 
+                         data = airbnb_data)
+# Summary
+print(rf_model)
+```
+
+```{r}
+importance(rf_model)
+varImpPlot(rf_model)
+```
+
+
+Cleanliness and check-in experience turned out to be the most influential factors of positive guest experience. This finding is in line with the hospitality industry standards emphasizing first impressions and core amenities.  The superhost status also emerged as a significant variable, suggesting that Airbnb’s own classification system is a reliable indicator of quality of guest experience.
+
+
+```{r}
+predictions <- predict(rf_model, newdata = airbnb_data)
+```
+
+**Adding the predicted values to your original dataset**
+
+```{r}
+airbnb_data <- cbind(airbnb_data, Predicted_Price = predictions)
+```
+
+
+**Visualize the relationship between actual and predicted prices**
+
+```{r,warning=FALSE}
+predictions <- predict(rf_model, newdata = airbnb_data)
+residuals <- airbnb_data$scaled_values - predictions
+#residuals <- resid(rf_model)
+
+ggplot() +
+  geom_point(aes(x = predictions, y = residuals)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  ggtitle("Residuals vs. Fitted Values") +
+  xlab("Fitted Values") +
+  ylab("Residuals") +
+  theme_minimal() 
+```
+
+
+
+The above plot of residuals vs. fitted values for the Random Forest model revealed a random dispersion of residuals around the zero line, not showing any pattern that would suggest model inadequacies. This randomness in residuals is indicative of a well-fitting model, as it infers that the model's predictions are consistent across the range of fitted values even though there are few outliers.
