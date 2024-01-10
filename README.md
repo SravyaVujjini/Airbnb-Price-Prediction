@@ -10,6 +10,8 @@ Our project focuses on understanding the details of Airbnb listings through the 
 #### Benefits:
 
 ● Gaining insights into how the pricing works significantly improves the transparency of the Airbnb marketplace in Asheville. This helps hosts by assisting them in establishing competitive prices and allows travelers to make more informed decisions while booking.
+
 ● Identifying the key factors that influence price listings not only benefits hosts by maximizing their property’s value but also provides valuable insights that contribute to a broader understanding of dynamics within the shared accommodation industry.
+
 ● The factors contributing to the guest’s perceived value of listing hold significance for hosts aiming to enhance their listings and for Airbnb in refining its criteria for guest evaluations,
 ultimately improving the quality of stays on the platform
